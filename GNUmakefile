@@ -4,7 +4,7 @@ CPPFLAGS+= -MMD -MP
 LDLIBS+= -lm
 LDFLAGS+=
 ALL = fasta2DB DB2fasta quiva2DB DB2quiva DBsplit DBdust Catrack DBshow DBstats DBrm simulator \
-      fasta2DAM DAM2fasta DBdump
+      fasta2DAM DAM2fasta DBdump rangen
 vpath %.c ${THISDIR}
 
 all: ${ALL}
