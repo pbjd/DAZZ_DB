@@ -14,7 +14,7 @@ DB2fasta: DB2fasta.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DB2fasta DB2fasta.c DB.c QV.c -lm
 
 quiva2DB: quiva2DB.c DB.c DB.h QV.c QV.h
-	gcc $(CFLAGS) -o quiva2DB quiva2DB.c DB.c QV.c -lm
+	gcc $(CFLAGS) -DINTERACTIVE -o quiva2DB quiva2DB.c DB.c QV.c -lm
 
 DB2quiva: DB2quiva.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DB2quiva DB2quiva.c DB.c QV.c -lm

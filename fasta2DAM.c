@@ -35,7 +35,7 @@
 #define PATHSEP "/"
 #endif
 
-static char *Usage = "[-v] <path:string> ( -f<file> | <input:fasta> ... )";
+static char *Usage = "[-v] <path:dam> ( -f<file> | -i[<name>] | <input:fasta> ... )";
 
 static char number[128] =
     { 0, 0, 0, 0, 0, 0, 0, 0,
@@ -68,6 +68,8 @@ File_Iterator *init_file_iterator(int argc, char **argv, FILE *input, int first)
 { File_Iterator *it;
 
   it = Malloc(sizeof(File_Iterator),"Allocating file iterator");
+  if (it == NULL)
+    return (NULL);
   it->argc  = argc;
   it->argv  = argv;
   it->input = input;
@@ -94,12 +96,15 @@ int next_file(File_Iterator *it)
       if (fgets(nbuffer,MAX_NAME+8,it->input) == NULL)
         { if (feof(it->input))
             return (0);
-          SYSTEM_ERROR;
+          fprintf(stderr,"%s: IO error reading line %d of -f file of names\n",Prog_Name,it->count);
+          it->name = NULL;
+          return (1);
         }
       if ((eol = index(nbuffer,'\n')) == NULL)
         { fprintf(stderr,"%s: Line %d in file list is longer than %d chars!\n",
                          Prog_Name,it->count,MAX_NAME+7);
           it->name = NULL;
+          return (1);
         }
       *eol = '\0';
       it->count += 1;
@@ -110,21 +115,23 @@ int next_file(File_Iterator *it)
 
 
 int main(int argc, char *argv[])
-{ FILE  *ostub;
+{ FILE  *istub, *ostub;
   char  *dbname;
   char  *root, *pwd;
 
   FILE  *bases, *indx, *hdrs;
-  int64  boff, hoff;
+  int64  boff, ioff, hoff, noff;
 
   int    ifiles, ofiles;
   char **flist;
 
   HITS_DB db;
   int     ureads;
+  int64   offset, hdrset;
 
-  int     VERBOSE;
+  char   *PIPE;
   FILE   *IFILE;
+  int     VERBOSE;
 
   //   Process command line
 
@@ -134,6 +141,7 @@ int main(int argc, char *argv[])
     ARG_INIT("fasta2DAM")
 
     IFILE = NULL;
+    PIPE  = NULL;
 
     j = 1;
     for (i = 1; i < argc; i++)
@@ -149,6 +157,20 @@ int main(int argc, char *argv[])
                 exit (1);
               }
             break;
+          case 'i':
+            PIPE = argv[i]+2;
+            if (PIPE[0] != '\0')
+              { FILE *temp;
+
+                temp = fopen(PIPE,"w");
+                if (temp == NULL)
+                  { fprintf(stderr,"%s: Cannot create -i name '%s'\n",Prog_Name,argv[i]+2);
+                    exit (1);
+                  }
+                fclose(temp);
+                unlink(PIPE);
+              }
+            break;
         }
       else
         argv[j++] = argv[i];
@@ -156,70 +178,148 @@ int main(int argc, char *argv[])
 
     VERBOSE = flags['v'];
 
-    if ((IFILE == NULL && argc <= 2) || (IFILE != NULL && argc != 2))
+    if (IFILE != NULL && PIPE != NULL)
+      { fprintf(stderr,"%s: Cannot use both -f and -i together\n",Prog_Name);
+        exit (1);
+      }
+
+    if ( (IFILE == NULL && PIPE == NULL && argc <= 2) ||
+        ((IFILE != NULL || PIPE != NULL) && argc != 2))
       { fprintf(stderr,"Usage: %s %s\n",Prog_Name,Usage);
         exit (1);
       }
   }
 
-  //  Try to open DB file, if present then adding to DB, otherwise creating new DB.  Set up
+  //  Try to open DAM file, if present then adding to DAM, otherwise creating new DAM.  Set up
   //  variables as follows:
   //    dbname = full name of map index = <pwd>/<root>.dam
+  //    istub  = open db file (if adding) or NULL (if creating)
   //    ostub  = new image of db file (will overwrite old image at end)
   //    bases  = .bps file positioned for appending
   //    indx   = .idx file positioned for appending
+  //    hdrs   = .hdr file positioned for appending
   //    ureads = # of reads currently in db
-  //    boff   = offset in .bps at which to place next sequence
-  //    hoff   = offset in .hdr at which to place next header prefix
+  //    offset = offset in .bps at which to place next sequence
+  //    hdrset = offset in .hdr at which to place next header
+  //    ioff   = offset in .idx file to truncate to if command fails
+  //    boff   = offset in .bps file to truncate to if command fails
+  //    hoff   = offset in .hdr file to truncate to if command fails
   //    ifiles = # of .fasta files to add
   //    ofiles = # of .fasta files added so far
-  //    flist  = [0..ifiles] list of file names (root only) added to db so far
+  //    flist  = [0..ifiles+ofiles] list of file names (root only) added to dam so far
 
-  root   = Root(argv[1],".dam");
-  pwd    = PathTo(argv[1]);
-  dbname = Strdup(Catenate(pwd,"/",root,".dam"),"Allocating map index name");
-  if (dbname == NULL)
-    exit (1);
+  { int i;
 
-  if (IFILE == NULL)
-    ifiles = argc-2;
-  else
-    { File_Iterator *ng;
+    root   = Root(argv[1],".dam");
+    pwd    = PathTo(argv[1]);
+    dbname = Strdup(Catenate(pwd,"/",root,".dam"),"Allocating map index name");
+    if (dbname == NULL)
+      exit (1);
 
-      ifiles = 0;
-      ng = init_file_iterator(argc,argv,IFILE,2);
-      while (next_file(ng))
-        ifiles += 1;
-      free(ng);
-    }
-  ofiles = 0;
+    if (PIPE != NULL)
+      ifiles = 1;
+    else if (IFILE == NULL)
+      ifiles = argc-2;
+    else
+      { File_Iterator *ng;
 
-  bases = Fopen(Catenate(pwd,PATHSEP,root,".bps"),"w");
-  indx  = Fopen(Catenate(pwd,PATHSEP,root,".idx"),"w");
-  hdrs  = Fopen(Catenate(pwd,PATHSEP,root,".hdr"),"w");
-  if (bases == NULL || indx == NULL || hdrs == NULL)
-    exit (1);
+        ifiles = 0;
+        ng = init_file_iterator(argc,argv,IFILE,2);
+        if (ng == NULL)
+          exit (1);
+        while (next_file(ng))
+          { if (ng->name == NULL)
+              exit (1);
+            ifiles += 1;
+          }
+        free(ng);
+      }
 
-  flist  = (char **) Malloc(sizeof(char *)*ifiles,"Allocating file list");
-  fwrite(&db,sizeof(HITS_DB),1,indx);
+    bases = NULL;
+    indx  = NULL;
+    hdrs  = NULL;
+    ostub = NULL;
+    ioff  = 0;
+    boff  = 0;
+    hoff  = 0;
 
-  ureads  = 0;
-  boff    = 0;
-  hoff    = 0;
+    istub = fopen(dbname,"r");
+    if (istub == NULL)
+      { ofiles = 0;
 
-  ostub  = Fopen(dbname,"w+");
-  if (ostub == NULL)
-    exit (1);
+        bases = Fopen(Catenate(pwd,PATHSEP,root,".bps"),"w+");
+        indx  = Fopen(Catenate(pwd,PATHSEP,root,".idx"),"w+");
+        hdrs  = Fopen(Catenate(pwd,PATHSEP,root,".hdr"),"w+");
+        if (bases == NULL || indx == NULL || hdrs == NULL)
+          goto error;
 
-  fprintf(ostub,DB_NFILE,argc-2);
+        fwrite(&db,sizeof(HITS_DB),1,indx);
+
+        ureads  = 0;
+        offset  = 0;
+        hdrset  = 0;
+        boff    = 0;
+        ioff    = 0;
+        hoff    = 0;
+      }
+    else
+      { if (fscanf(istub,DB_NFILE,&ofiles) != 1)
+          { fprintf(stderr,"%s: %s.dam is corrupted, read failed 1\n",Prog_Name,root);
+            goto error;
+          }
+
+        bases = Fopen(Catenate(pwd,PATHSEP,root,".bps"),"r+");
+        indx  = Fopen(Catenate(pwd,PATHSEP,root,".idx"),"r+");
+        hdrs  = Fopen(Catenate(pwd,PATHSEP,root,".hdr"),"r+");
+        if (bases == NULL || indx == NULL || hdrs == NULL)
+          goto error;
+
+        if (fread(&db,sizeof(HITS_DB),1,indx) != 1)
+          { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
+            goto error;
+          }
+        fseeko(bases,0,SEEK_END);
+        fseeko(indx, 0,SEEK_END);
+        fseeko(hdrs, 0,SEEK_END);
+
+        ureads = db.ureads;
+        offset = ftello(bases);
+        hdrset = ftello(hdrs);
+        boff   = offset;
+        ioff   = ftello(indx);
+        hoff   = hdrset;
+      }
+
+    flist  = (char **) Malloc(sizeof(char *)*(ofiles+ifiles),"Allocating file list");
+    ostub  = Fopen(Catenate(pwd,"/",root,".dbx"),"w+");
+    if (ostub == NULL || flist == NULL)
+      goto error;
+
+    fprintf(ostub,DB_NFILE,ofiles+ifiles);
+    noff = 0;
+    for (i = 0; i < ofiles; i++)
+      { int  last;
+        char prolog[MAX_NAME], fname[MAX_NAME];
+
+        if (fscanf(istub,DB_FDATA,&last,fname,prolog) != 3)
+          { fprintf(stderr,"%s: %s.dam is corrupted, read failed 5(%d)\n",Prog_Name,root,i);
+            goto error;
+          }
+        if ((flist[i] = Strdup(fname,"Adding to file list")) == NULL)
+          goto error;
+        noff = ftello(ostub);
+        fprintf(ostub,DB_FDATA,last,fname,prolog);
+      }
+  }
 
   { int            maxlen;
     int64          totlen, count[4];
     int            rmax;
     HITS_READ      prec;
     char          *read;
+    int            append;
     int            c;
-    File_Iterator *ng;
+    File_Iterator *ng = NULL;
 
     //  Buffer for accumulating .fasta sequence over multiple lines
 
@@ -235,31 +335,66 @@ int main(int argc, char *argv[])
 
     //  For each .fasta file do:
 
-    ng = init_file_iterator(argc,argv,IFILE,2);
-    while (next_file(ng))
+    if (PIPE == NULL)
+      { ng = init_file_iterator(argc,argv,IFILE,2);
+        if (ng == NULL)
+          goto error;
+      }
+
+    while (PIPE != NULL || next_file(ng))
       { FILE *input;
         char *path, *core;
         int   nline, eof, rlen;
 
-        if (ng->name == NULL) goto error;
+        //  Open it: <path>/<core>.fasta if file, stdin otherwise with core = PIPE or "stdout"
 
-        //  Open it: <path>/<core>.fasta, check that core is not too long,
-        //           and checking that it is not already in flist.
+        if (PIPE == NULL)
 
-        path  = PathTo(ng->name);
-        core  = Root(ng->name,".fasta");
-        if ((input = Fopen(Catenate(path,"/",core,".fasta"),"r")) == NULL)
-          goto error;
-        free(path);
+          { if (ng->name == NULL) goto error;
+
+            path  = PathTo(ng->name);
+            core  = Root(ng->name,".fasta");
+            if ((input = Fopen(Catenate(path,"/",core,".fasta"),"r")) == NULL)
+              goto error;
+            free(path);
+          }
+
+        else
+
+          { if (PIPE[0] == '\0')
+              core  = Strdup("stdout","Allocating file name");
+            else
+              core  = Strdup(PIPE,"Allocating file name");
+            if (core == NULL)
+              goto error;
+            input = stdin;
+          }
+
+        //  Check that core is not too long and name is unique or last source if PIPE'd
+        //    If PIPE'd and last source, then overwrite last file line of new stub file.
+
+        if (strlen(core) >= MAX_NAME)
+          { fprintf(stderr,"%s: File name over %d chars: '%.200s'\n",
+                           Prog_Name,MAX_NAME,core);
+            goto error;
+          }
 
         { int j;
 
-          for (j = 0; j < ofiles; j++)
-            if (strcmp(core,flist[j]) == 0)
-              { fprintf(stderr,"%s: File %s.fasta is already in database %s.db\n",
-                               Prog_Name,core,Root(argv[1],".db"));
-                goto error;
-              }
+          append = 0;
+          if (PIPE == NULL || (strcmp(core,"stdout") != 0 &&
+                 (ofiles == 0 || strcmp(core,flist[ofiles-1]) != 0)))
+            { for (j = 0; j < ofiles; j++)
+                if (strcmp(core,flist[j]) == 0)
+                  { fprintf(stderr,"%s: File %s.fasta is already in database %s.dam\n",
+                                   Prog_Name,core,Root(argv[1],".dam"));
+                    goto error;
+                  }
+            }
+	  else if (ofiles > 0 && strcmp(core,flist[ofiles-1]) == 0)
+            { fseeko(ostub,noff,SEEK_SET);
+              append = 1;
+            }
         }
 
         //  Get the header of the first line.  If the file is empty skip.
@@ -277,10 +412,15 @@ int main(int argc, char *argv[])
         //   Add the file name to flist
 
         if (VERBOSE)
-          { fprintf(stderr,"Adding '%s' ...\n",core);
+          { if (PIPE != NULL && PIPE[0] == '\0')
+              fprintf(stderr,"Adding scaffolds from stdio ...\n");
+            else
+              fprintf(stderr,"Adding '%s.fasta' ...\n",core);
             fflush(stderr);
           }
-        flist[ofiles++] = core;
+    
+        if (!append)
+          flist[ofiles++] = core;
 
         // Check that the first line is a header line
 
@@ -344,8 +484,8 @@ int main(int argc, char *argv[])
                   pbeg = i;
                   prec.fpulse = pbeg;
                   prec.origin = n++;
-                  prec.boff   = boff;
-                  prec.coff   = hoff;
+                  prec.boff   = offset;
+                  prec.coff   = hdrset;
                   prec.flags  = DB_BEST;
                   while (i < rlen)
                     { x = number[(int) read[i]];
@@ -362,51 +502,186 @@ int main(int argc, char *argv[])
                   Compress_Read(plen,read+pbeg);
                   clen = COMPRESSED_LEN(plen);
                   fwrite(read+pbeg,1,clen,bases);
-                  boff += clen;
+                  offset += clen;
 
                   fwrite(&prec,sizeof(HITS_READ),1,indx);
                 }
-              hoff += hlen;
+              hdrset += hlen;
             }
-
-          fprintf(ostub,DB_FDATA,ureads,core,core);
-
-          fclose(input);
         }
+
+        fprintf(ostub,DB_FDATA,ureads,core,core);
+
+        if (PIPE == NULL)
+          fclose(input);
+        else
+          break;
       }
 
     //  Update relevant fields in db record
 
     db.ureads = ureads;
-    db.treads = ureads;
-    for (c = 0; c < 4; c++)
-      db.freq[c] = (float) ((1.*count[c])/totlen);
-    db.totlen = totlen;
-    db.maxlen = maxlen;
-    db.cutoff = -1;
+    if (istub == NULL)
+      { for (c = 0; c < 4; c++)
+          db.freq[c] = (float) ((1.*count[c])/totlen);
+        db.totlen = totlen;
+        db.maxlen = maxlen;
+        db.cutoff = -1;
+      }
+    else
+      { for (c = 0; c < 4; c++)
+          db.freq[c] = (float) ((db.freq[c]*db.totlen + (1.*count[c]))/(db.totlen + totlen));
+        db.totlen += totlen;
+        if (maxlen > db.maxlen)
+          db.maxlen = maxlen;
+      }
   }
+
+  //  If db has been previously partitioned then calculate additional partition points and
+  //    write to new db file image
+
+  if (db.cutoff >= 0)
+    { int64      totlen, dbpos, size;
+      int        nblock, ireads, tfirst, rlen;
+      int        ufirst, cutoff, allflag;
+      HITS_READ  record;
+      int        i;
+
+      if (VERBOSE)
+        { fprintf(stderr,"Updating block partition ...\n");
+          fflush(stderr);
+        }
+
+      //  Read the block portion of the existing db image getting the indices of the first
+      //    read in the last block of the exisiting db as well as the partition parameters.
+      //    Copy the old image block information to the new block information (except for
+      //    the indices of the last partial block)
+
+      if (fscanf(istub,DB_NBLOCK,&nblock) != 1)
+        { fprintf(stderr,"%s: %s.dam is corrupted, read failed 2\n",Prog_Name,root);
+          goto error;
+        }
+      dbpos = ftello(ostub);
+      fprintf(ostub,DB_NBLOCK,0);
+      if (fscanf(istub,DB_PARAMS,&size,&cutoff,&allflag) != 3)
+        { fprintf(stderr,"%s: %s.dam is corrupted, read failed 3\n",Prog_Name,root);
+          goto error;
+        }
+      fprintf(ostub,DB_PARAMS,size,cutoff,allflag);
+      if (allflag)
+        allflag = 0;
+      else
+        allflag = DB_BEST;
+
+      nblock -= 1;
+      for (i = 0; i <= nblock; i++)
+        { if (fscanf(istub,DB_BDATA,&ufirst,&tfirst) != 2)
+            { fprintf(stderr,"%s: %s.dam is corrupted, read failed 4\n",Prog_Name,root);
+              goto error;
+            }
+          fprintf(ostub,DB_BDATA,ufirst,tfirst);
+        }
+
+      //  Seek the first record of the last block of the existing db in .idx, and then
+      //    compute and record partition indices for the rest of the db from this point
+      //    forward.
+
+      fseeko(indx,sizeof(HITS_DB)+sizeof(HITS_READ)*ufirst,SEEK_SET);
+      totlen = 0;
+      ireads = 0;
+      for (i = ufirst; i < ureads; i++)
+        { if (fread(&record,sizeof(HITS_READ),1,indx) != 1)
+            { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
+              goto error;
+            }
+          rlen = record.rlen;
+          if (rlen >= cutoff)
+            { ireads += 1;
+              tfirst += 1;
+              totlen += rlen;
+              if (totlen >= size)
+                { fprintf(ostub," %9d %9d\n",i+1,tfirst);
+                  totlen = 0;
+                  ireads = 0;
+                  nblock += 1;
+                }
+            }
+        }
+
+      if (ireads > 0)
+        { fprintf(ostub,DB_BDATA,ureads,tfirst);
+          nblock += 1;
+        }
+
+      db.treads = tfirst;
+
+      fseeko(ostub,dbpos,SEEK_SET);
+
+      fprintf(ostub,DB_NBLOCK,nblock);    //  Rewind and record the new number of blocks
+    }
+  else
+    db.treads = ureads;
+
+  rewind(ostub);
+  fprintf(ostub,DB_NFILE,ofiles);
 
   rewind(indx);
   fwrite(&db,sizeof(HITS_DB),1,indx);   //  Write the finalized db record into .idx
 
+  if (istub != NULL)
+    fclose(istub);
   fclose(ostub);
   fclose(indx);
   fclose(bases);
   fclose(hdrs);
+
+  rename(Catenate(pwd,"/",root,".dbx"),dbname);   //  New image replaces old image
 
   exit (0);
 
-  //  Error exit:  Remove the .idx, .bps, and .dam files
+  //  Error exit:  Either truncate or remove the .idx, .bps, and .hdr files as appropriate.
+  //               Remove the new image file <pwd>/<root>.dbx
 
 error:
-  fclose(ostub);
-  fclose(indx);
-  fclose(hdrs);
-  fclose(bases);
-  unlink(Catenate(pwd,PATHSEP,root,".idx"));
-  unlink(Catenate(pwd,PATHSEP,root,".bps"));
-  unlink(Catenate(pwd,PATHSEP,root,".hdr"));
-  unlink(Catenate(pwd,"/",root,".dam"));
+  if (ioff != 0)
+    { fseeko(indx,0,SEEK_SET);
+      if (ftruncate(fileno(indx),ioff) < 0)
+        fprintf(stderr,"%s: Fatal: could not restore %s.idx after error, truncate failed\n",
+                       Prog_Name,root);
+    }
+  if (boff != 0)
+    { fseeko(bases,0,SEEK_SET);
+      if (ftruncate(fileno(bases),boff) < 0)
+        fprintf(stderr,"%s: Fatal: could not restore %s.bps after error, truncate failed\n",
+                       Prog_Name,root);
+    }
+  if (hoff != 0)
+    { fseeko(hdrs,0,SEEK_SET);
+      if (ftruncate(fileno(hdrs),hoff) < 0)
+        fprintf(stderr,"%s: Fatal: could not restore %s.hdr after error, truncate failed\n",
+                       Prog_Name,root);
+    }
+  if (indx != NULL)
+    { fclose(indx);
+      if (ioff == 0)
+        unlink(Catenate(pwd,PATHSEP,root,".idx"));
+    }
+  if (bases != NULL)
+    { fclose(bases);
+      if (boff == 0)
+        unlink(Catenate(pwd,PATHSEP,root,".bps"));
+    }
+  if (hdrs != NULL)
+    { fclose(hdrs);
+      if (hoff == 0)
+        unlink(Catenate(pwd,PATHSEP,root,".hdr"));
+    }
+  if (ostub != NULL)
+    { fclose(ostub);
+      unlink(Catenate(pwd,"/",root,".dbx"));
+    }
+  if (istub != NULL)
+    fclose(istub);
 
   exit (1);
 }

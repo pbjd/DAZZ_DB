@@ -78,22 +78,23 @@ int main(int argc, char *argv[])
       exit (1);
   }
 
-  //  For each file do:
+  //  For each cell do:
 
   { HITS_READ  *reads;
-    int         f, first, nfiles;
+    char        lname[MAX_NAME];
+    FILE       *ofile = NULL;
+    int         f, first, last, ofirst, nfiles;
     QVcoding   *coding;
     char      **entry;
 
     if (fscanf(dbfile,DB_NFILE,&nfiles) != 1)
       SYSTEM_ERROR
 
-    entry = New_QV_Buffer(db);
     reads = db->reads;
-    first = 0;
+    entry = New_QV_Buffer(db);
+    first = ofirst = 0;
     for (f = 0; f < nfiles; f++)
-      { int   i, last;
-        FILE *ofile;
+      { int   i;
         char  prolog[MAX_NAME], fname[MAX_NAME];
 
         //  Scan db image file line, create .quiva file for writing
@@ -103,18 +104,42 @@ int main(int argc, char *argv[])
         if (fscanf(dbfile,DB_FDATA,&last,fname,prolog) != 3)
           SYSTEM_ERROR
 
-        if ((ofile = Fopen(Catenate(".","/",fname,".quiva"),"w")) == NULL)
-          exit (1);
+        if (f == 0 || strcmp(fname,lname) != 0)
+          { if (f > 0)
+              { if (ofile == stdout)
+                  { fprintf(stderr," %d quivas\n",first-ofirst);
+                    fflush(stderr);
+                  }
+                else
+                  fclose(ofile);
+              }
 
-        if (VERBOSE)
-          { fprintf(stderr,"Creating %s.quiva ...\n",fname);
-            fflush(stderr);
+            if (strcmp(fname,"stdout") == 0)
+              { ofile  = stdout;
+                ofirst = first;
+
+                if (VERBOSE)
+                  { fprintf(stderr,"Sending to stdout ...");
+                    fflush(stdout);
+                  }
+              }
+            else
+              { if ((ofile = Fopen(Catenate(".","/",fname,".quiva"),"w")) == NULL)
+                  exit (1);
+
+                if (VERBOSE)
+                  { fprintf(stderr,"Creating %s.quiva ...\n",fname);
+                    fflush(stderr);
+                  }
+              }
+
+            strcpy(lname,fname);
           }
-
-        coding = Read_QVcoding(quiva);
 
         //   For the relevant range of reads, write the header for each to the file
         //     and then uncompress and write the quiva entry for each
+
+        coding = Read_QVcoding(quiva);
 
         for (i = first; i < last; i++)
           { int        e, flags, qv, rlen;
@@ -144,6 +169,15 @@ int main(int argc, char *argv[])
           }
 
         first = last;
+      }
+
+    if (f > 0)
+      { if (ofile == stdout)
+          { fprintf(stderr," %d quivas\n",first-ofirst);
+            fflush(stderr);
+          }
+        else
+          fclose(ofile);
       }
   }
 
