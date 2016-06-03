@@ -5,6 +5,9 @@ LDLIBS+= -lm
 LDFLAGS+=
 ALL = fasta2DB DB2fasta quiva2DB DB2quiva DBsplit DBdust Catrack DBshow DBstats DBrm simulator \
       fasta2DAM DAM2fasta DBdump rangen
+ALL = fasta2DB DB2fasta DBsplit DBdust Catrack DBshow DBstats DBrm simulator \
+      fasta2DAM DAM2fasta DBdump rangen
+#quiva2DB would require -DINTERACTIVE, and we do not need quiva support.
 vpath %.c ${THISDIR}
 
 all: ${ALL}
@@ -19,7 +22,7 @@ libdazzdb.a: DB.o QV.o
 libdazzdb.so: DB.os QV.os
 	${CC} -o $@ $^ -shared ${LDFLAGS}
 install:
-	cp -f fasta2DB DBsplit DBshow DBstats DBdust DBdump DB2fasta DBrm simulator ${PREFIX}/bin
+	cp -f ${ALL} ${PREFIX}/bin
 	cp -f libdazzdb.* ${PREFIX}/lib
 clean:
 	rm -f ${ALL}
