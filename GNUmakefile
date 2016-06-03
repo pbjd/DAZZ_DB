@@ -24,6 +24,8 @@ libdazzdb.so: DB.os QV.os
 install:
 	cp -f ${ALL} ${PREFIX}/bin
 	cp -f libdazzdb.* ${PREFIX}/lib
+symlink:
+	ln -sf $(addprefix ${THISDIR}/,${ALL}) ${PREFIX}/bin
 clean:
 	rm -f ${ALL}
 	rm -f ${DEPS}
