@@ -22,8 +22,8 @@ libdazzdb.a: DB.o QV.o
 libdazzdb.so: DB.os QV.os
 	${CC} -o $@ $^ -shared ${LDFLAGS}
 install:
-	cp -f ${ALL} ${PREFIX}/bin
-	cp -f libdazzdb.* ${PREFIX}/lib
+	rsync -av ${ALL} ${PREFIX}/bin
+	rsync -av libdazzdb.* ${PREFIX}/lib
 symlink:
 	ln -sf $(addprefix ${THISDIR}/,${ALL}) ${PREFIX}/bin
 clean:
