@@ -25,7 +25,8 @@ install:
 	rsync -av ${ALL} ${PREFIX}/bin
 	rsync -av libdazzdb.* ${PREFIX}/lib
 symlink:
-	ln -sf $(addprefix ${THISDIR}/,${ALL}) ${PREFIX}/bin
+	ln -sf $(addprefix ${CURDIR}/,${ALL}) ${PREFIX}/bin
+	ln -sf $(addprefix ${CURDIR}/,$(wildcard libdazzdb.*)) ${PREFIX}/lib
 clean:
 	rm -f ${ALL}
 	rm -f ${DEPS}
