@@ -24,9 +24,11 @@ libdazzdb.so: DB.os QV.os
 install:
 	rsync -av ${ALL} ${PREFIX}/bin
 	rsync -av libdazzdb.* ${PREFIX}/lib
+	rsync -av $(wildcard ${THISDIR}/*.h) ${PREFIX}/include
 symlink:
 	ln -sf $(addprefix ${CURDIR}/,${ALL}) ${PREFIX}/bin
 	ln -sf $(addprefix ${CURDIR}/,$(wildcard libdazzdb.*)) ${PREFIX}/lib
+	ln -sf $(wildcard ${THISDIR}/*.h) ${PREFIX}/include
 clean:
 	rm -f ${ALL}
 	rm -f ${DEPS}
