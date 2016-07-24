@@ -1405,7 +1405,7 @@ int Load_Read(HITS_DB *db, int i, char *read, int ascii)
   HITS_READ *r = db->reads;
 
   if (i >= db->nreads)
-    { EPRINTF(EPLACE,"%s: Index out of bounds (Load_Read)\n",Prog_Name);
+    { EPRINTF(EPLACE,"%s: Index %d out of bounds %d (Load_Read)\n",Prog_Name,i,db->nreads);
       EXIT(1);
     }
   if (bases == NULL)
@@ -1449,7 +1449,7 @@ char *Load_Subread(HITS_DB *db, int i, int beg, int end, char *read, int ascii)
   HITS_READ *r = db->reads;
 
   if (i >= db->nreads)
-    { EPRINTF(EPLACE,"%s: Index out of bounds (Load_Read)\n",Prog_Name);
+    { EPRINTF(EPLACE,"%s: Subread Index %d out of bounds %d (Load_Read)\n",Prog_Name,i,db->nreads);
       EXIT(NULL);
     }
   if (bases == NULL)
