@@ -395,10 +395,10 @@ int main(int argc, char *argv[])
         nline = 1;
         eof   = (fgets(read,MAX_NAME,input) == NULL);
         if (eof || strlen(read) < 1)
-          { fprintf(stderr,"'%s', file is empty!\n",core);
+          { fprintf(stderr,"Skipping '%s', file is empty!\n",core);
             fclose(input);
             free(core);
-            goto error;
+            continue;
           }
 
         //   Add the file name to flist
