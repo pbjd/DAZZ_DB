@@ -1,40 +1,3 @@
-/************************************************************************************\
-*                                                                                    *
-* Copyright (c) 2014, Dr. Eugene W. Myers (EWM). All rights reserved.                *
-*                                                                                    *
-* Redistribution and use in source and binary forms, with or without modification,   *
-* are permitted provided that the following conditions are met:                      *
-*                                                                                    *
-*  · Redistributions of source code must retain the above copyright notice, this     *
-*    list of conditions and the following disclaimer.                                *
-*                                                                                    *
-*  · Redistributions in binary form must reproduce the above copyright notice, this  *
-*    list of conditions and the following disclaimer in the documentation and/or     *
-*    other materials provided with the distribution.                                 *
-*                                                                                    *
-*  · The name of EWM may not be used to endorse or promote products derived from     *
-*    this software without specific prior written permission.                        *
-*                                                                                    *
-* THIS SOFTWARE IS PROVIDED BY EWM ”AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
-* INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND       *
-* FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL EWM BE LIABLE   *
-* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES *
-* (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS  *
-* OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY      *
-* THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     *
-* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN  *
-* IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                                      *
-*                                                                                    *
-* For any issues regarding this software and its use, contact EWM at:                *
-*                                                                                    *
-*   Eugene W. Myers Jr.                                                              *
-*   Bautzner Str. 122e                                                               *
-*   01099 Dresden                                                                    *
-*   GERMANY                                                                          *
-*   Email: gene.myers@gmail.com                                                      *
-*                                                                                    *
-\************************************************************************************/
-
 /*******************************************************************************************
  *
  *  Compressor/decompressor for .quiv files: customized Huffman codes for each stream based on
@@ -50,7 +13,18 @@
 
 #ifndef _QV_COMPRESSOR
 
+#include <stdio.h>
+
 #define _QV_COMPRESSOR
+
+  //  The defined constant INTERACTIVE (set in DB.h) determines whether an interactive or
+  //    batch version of the routines in this library are compiled.  In batch mode, routines
+  //    print an error message and exit.  In interactive mode, the routines place the error
+  //    message in EPLACE (also defined in DB.h) and return an error value, typically NULL
+  //    if the routine returns a pointer, and an unusual integer value if the routine returns
+  //    an integer.
+  //  Below when an error return is described, one should understand that this value is returned
+  //    only if the routine was compiled in INTERACTIVE mode.
 
   //  A PacBio compression scheme
 
@@ -68,23 +42,33 @@ typedef struct
   } QVcoding;
 
   // Read the next nlines of input, and QVentry returns a pointer to the first line if needed.
+  //   If end-of-input is encountered before any further input, -1 is returned.  If there is
+  //   an error than -2 is returned.  Otherwise the length of the line(s) read is returned.
 
 int       Read_Lines(FILE *input, int nlines);
 char     *QVentry();
 
-  // Read the .quiva file on input and record frequency statistics.
+  // Get and set the line counter for error reporting
 
-void     QVcoding_Scan(FILE *input);
+void      Set_QV_Line(int line);
+int       Get_QV_Line();
+
+  // Read up to the next num entries or until eof from the .quiva file on input and record
+  //   frequency statistics.  Copy these entries to the temporary file temp if != NULL.
+  //   If there is an error then -1 is returned, otherwise the number of entries read.
+
+int       QVcoding_Scan(FILE *input, int num, FILE *temp);
 
   // Given QVcoding_Scan has been called at least once, create an encoding scheme based on
   //   the accumulated statistics and return a pointer to it.  The returned encoding object
   //   is *statically allocated within the routine.  If lossy is set then use a lossy scaling
-  //   for the insertion and merge streams.
+  //   for the insertion and merge streams.  If there is an error, then NULL is returned.
 
 QVcoding *Create_QVcoding(int lossy);
 
   //  Read/write a coding scheme to input/output.  The encoding object returned by the reader
-  //    is *statically* allocated within the routine.
+  //    is *statically* allocated within the routine.  If an error occurs while reading then
+  //    NULL is returned.
 
 QVcoding *Read_QVcoding(FILE *input);
 void      Write_QVcoding(FILE *output, QVcoding *coding);
@@ -95,16 +79,18 @@ void      Free_QVcoding(QVcoding *coding);
 
   //  Assuming the file pointer is positioned just beyond an entry header line, read the
   //    next set of 5 QV lines, compress them according to 'coding', and output.  If lossy
-  //    is set then the scheme is a lossy one.
+  //    is set then the scheme is a lossy one.  A negative value is returned if an error
+  //    occurred, and the sequence length otherwise.
 
-void      Compress_Next_QVentry(FILE *input, FILE *output, QVcoding *coding, int lossy);
+int      Compress_Next_QVentry(FILE *input, FILE *output, QVcoding *coding, int lossy);
 
   //  Assuming the input is position just beyond the compressed encoding of an entry header,
   //    read the set of compressed encodings for the ensuing 5 QV vectors, decompress them,
   //    and place their decompressed values into entry which is a 5 element array of character
   //    pointers.  The parameter rlen computed from the preceeding header line, critically
-  //    provides the length of each of the 5 vectors.
+  //    provides the length of each of the 5 vectors.  A non-zero value is return only if an
+  //    error occured.
 
-void      Uncompress_Next_QVentry(FILE *input, char **entry, QVcoding *coding, int rlen);
+int      Uncompress_Next_QVentry(FILE *input, char **entry, QVcoding *coding, int rlen);
 
 #endif // _QV_COMPRESSOR

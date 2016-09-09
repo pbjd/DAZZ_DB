@@ -1,40 +1,3 @@
-/************************************************************************************\
-*                                                                                    *
-* Copyright (c) 2014, Dr. Eugene W. Myers (EWM). All rights reserved.                *
-*                                                                                    *
-* Redistribution and use in source and binary forms, with or without modification,   *
-* are permitted provided that the following conditions are met:                      *
-*                                                                                    *
-*  · Redistributions of source code must retain the above copyright notice, this     *
-*    list of conditions and the following disclaimer.                                *
-*                                                                                    *
-*  · Redistributions in binary form must reproduce the above copyright notice, this  *
-*    list of conditions and the following disclaimer in the documentation and/or     *
-*    other materials provided with the distribution.                                 *
-*                                                                                    *
-*  · The name of EWM may not be used to endorse or promote products derived from     *
-*    this software without specific prior written permission.                        *
-*                                                                                    *
-* THIS SOFTWARE IS PROVIDED BY EWM ”AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,    *
-* INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND       *
-* FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL EWM BE LIABLE   *
-* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES *
-* (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS  *
-* OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY      *
-* THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     *
-* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN  *
-* IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                                      *
-*                                                                                    *
-* For any issues regarding this software and its use, contact EWM at:                *
-*                                                                                    *
-*   Eugene W. Myers Jr.                                                              *
-*   Bautzner Str. 122e                                                               *
-*   01099 Dresden                                                                    *
-*   GERMANY                                                                          *
-*   Email: gene.myers@gmail.com                                                      *
-*                                                                                    *
-\************************************************************************************/
-
 /********************************************************************************************
  *
  *  Recreate all the .quiva files that have been loaded into a specified database.
@@ -115,22 +78,23 @@ int main(int argc, char *argv[])
       exit (1);
   }
 
-  //  For each file do:
+  //  For each cell do:
 
   { HITS_READ  *reads;
-    int         f, first, nfiles;
+    char        lname[MAX_NAME];
+    FILE       *ofile = NULL;
+    int         f, first, last, ofirst, nfiles;
     QVcoding   *coding;
     char      **entry;
 
     if (fscanf(dbfile,DB_NFILE,&nfiles) != 1)
       SYSTEM_ERROR
 
-    entry = New_QV_Buffer(db);
     reads = db->reads;
-    first = 0;
+    entry = New_QV_Buffer(db);
+    first = ofirst = 0;
     for (f = 0; f < nfiles; f++)
-      { int   i, last;
-        FILE *ofile;
+      { int   i;
         char  prolog[MAX_NAME], fname[MAX_NAME];
 
         //  Scan db image file line, create .quiva file for writing
@@ -140,18 +104,42 @@ int main(int argc, char *argv[])
         if (fscanf(dbfile,DB_FDATA,&last,fname,prolog) != 3)
           SYSTEM_ERROR
 
-        if ((ofile = Fopen(Catenate(".","/",fname,".quiva"),"w")) == NULL)
-          exit (1);
+        if (f == 0 || strcmp(fname,lname) != 0)
+          { if (f > 0)
+              { if (ofile == stdout)
+                  { fprintf(stderr," %d quivas\n",first-ofirst);
+                    fflush(stderr);
+                  }
+                else
+                  fclose(ofile);
+              }
 
-        if (VERBOSE)
-          { fprintf(stderr,"Creating %s.quiva ...\n",fname);
-            fflush(stderr);
+            if (strcmp(fname,"stdout") == 0)
+              { ofile  = stdout;
+                ofirst = first;
+
+                if (VERBOSE)
+                  { fprintf(stderr,"Sending to stdout ...");
+                    fflush(stdout);
+                  }
+              }
+            else
+              { if ((ofile = Fopen(Catenate(".","/",fname,".quiva"),"w")) == NULL)
+                  exit (1);
+
+                if (VERBOSE)
+                  { fprintf(stderr,"Creating %s.quiva ...\n",fname);
+                    fflush(stderr);
+                  }
+              }
+
+            strcpy(lname,fname);
           }
-
-        coding = Read_QVcoding(quiva);
 
         //   For the relevant range of reads, write the header for each to the file
         //     and then uncompress and write the quiva entry for each
+
+        coding = Read_QVcoding(quiva);
 
         for (i = first; i < last; i++)
           { int        e, flags, qv, rlen;
@@ -181,6 +169,15 @@ int main(int argc, char *argv[])
           }
 
         first = last;
+      }
+
+    if (f > 0)
+      { if (ofile == stdout)
+          { fprintf(stderr," %d quivas\n",first-ofirst);
+            fflush(stderr);
+          }
+        else
+          fclose(ofile);
       }
   }
 
